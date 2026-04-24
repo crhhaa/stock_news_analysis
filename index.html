@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 金融情報終端 | 智慧篩選版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #0b0f19; color: #e2e8f0; overflow: hidden; }
+        #sidebar { background-color: #111827; border-right: 1px solid #1f2937; }
+        .nav-item { transition: all 0.2s; cursor: pointer; border-left: 3px solid transparent; }
+        .nav-item.active { background-color: #1d4ed833; border-left-color: #3b82f6; color: #60a5fa; }
+        .nav-item:hover:not(.active) { background-color: #1f2937; }
+        #main-content { height: 100vh; overflow-y: auto; scroll-behavior: smooth; }
+        .data-card { background: #161b22; border: 1px solid #30363d; border-radius: 16px; overflow: hidden; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0b0f19; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 10px; }
+        /* 選擇器樣式 */
+        .custom-select { background: #1f2937; border: 1px solid #374151; color: #f3f4f6; padding: 10px; border-radius: 8px; width: 100%; outline: none; cursor: pointer; border: 1px solid #3b82f644; }
+    </style>
+</head>
+<body class="flex">
+
+    <aside id="sidebar" class="w-80 flex flex-col h-screen flex-shrink-0">
+        <div class="p-6 border-b border-gray-800 space-y-6">
+            <h1 class="text-xl font-bold text-white flex items-center gap-2">
+                <i class="fas fa-terminal text-blue-500"></i> 金融情報終端
+            </h1>
+            
+            <div>
+                <label class="text-[10px] text-gray-500 uppercase tracking-widest block mb-2 font-bold">1. 選擇觀測週次 Week</label>
+                <select id="week-picker" class="custom-select text-sm" onchange="loadWeeklyData(this.value)">
+                    <option>載入中...</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="text-[10px] text-gray-500 uppercase tracking-widest block mb-2 font-bold">2. 選擇具體日期 Date</label>
+                <select id="date-picker" class="custom-select text-sm" onchange="filterNewsByDate(this.value)">
+                    <option>請先選擇週次</option>
+                </select>
+            </div>
+        </div>
+
+        <nav id="news-nav" class="flex-grow overflow-y-auto py-4"></nav>
+    </aside>
+
+    <main id="main-content" class="flex-grow bg-[#0d1117]">
+        <div id="content-display" class="max-w-5xl mx-auto p-8 md:p-12">
+            <div class="h-screen flex items-center justify-center text-gray-500">
+                <p>正在初始化大數據終端...</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const CONFIG = {
+            jsonFolder: 'final_json_data',
+            imgBase: 'cropped_images'
+        };
+
+        let allWeeklyNews = []; // 存儲當週所有新聞
+        let currentFilteredNews = []; // 存儲過濾後的當日新聞
+
+        // 1. 初始化週次索引
+        async function initManifest() {
+            try {
+                const res = await fetch(`./${CONFIG.jsonFolder}/manifest.json`);
+                if (!res.ok) throw new Error();
+                const weeks = await res.json(); // 這裡假設 Python 已按降序排列
+                
+                const picker = document.getElementById('week-picker');
+                picker.innerHTML = weeks.map(w => `<option value="${w}">${w.replace('_', ' ')}</option>`).join('');
+                
+                loadWeeklyData(weeks[0]);
+            } catch (e) {
+                document.getElementById('content-display').innerHTML = "索引檔載入失敗。";
+            }
+        }
+
+        // 2. 載入該週 JSON 並處理日期清單
+        async function loadWeeklyData(weekId) {
+            try {
+                const res = await fetch(`./${CONFIG.jsonFolder}/${weekId}_dashboard_data.json`);
+                allWeeklyNews = await res.json();
+                
+                // 提取唯一日期並排序 (越新越上面)
+                const dates = [...new Set(allWeeklyNews.map(item => item.date))].sort().reverse();
+                
+                const datePicker = document.getElementById('date-picker');
+                datePicker.innerHTML = dates.map(d => `
+                    <option value="${d}">${d.substring(0,4)}-${d.substring(4,6)}-${d.substring(6,8)}</option>
+                `).join('');
+                
+                // 預設過濾並顯示該週最新一天的資料
+                filterNewsByDate(dates[0]);
+            } catch (e) {
+                document.getElementById('news-nav').innerHTML = `<div class="p-10 text-center text-red-500">週資料載入失敗</div>`;
+            }
+        }
+
+        // 3. 根據日期過濾新聞 (新增)
+        function filterNewsByDate(selectedDate) {
+            currentFilteredNews = allWeeklyNews.filter(news => news.date === selectedDate);
+            renderSidebar();
+            if (currentFilteredNews.length > 0) showNews(0);
+        }
+
+        function renderSidebar() {
+            const nav = document.getElementById('news-nav');
+            nav.innerHTML = currentFilteredNews.map((news, idx) => `
+                <div onclick="showNews(${idx})" id="nav-item-${idx}" class="nav-item px-6 py-4 border-b border-gray-800/30">
+                    <div class="text-[10px] text-blue-400 font-bold mb-1">${news.date} REPORT #${idx + 1}</div>
+                    <div class="text-sm font-medium line-clamp-2 text-gray-300 leading-snug">${news.news_summary}</div>
+                </div>
+            `).join('');
+        }
+
+        function showNews(index) {
+            const news = currentFilteredNews[index]; // 改用過濾後的列表
+            const display = document.getElementById('content-display');
+            
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.getElementById(`nav-item-${index}`)?.classList.add('active');
+
+            const imgPath = `./${CONFIG.imgBase}/${news.date}/${news.source_image}`;
+
+            display.innerHTML = `
+                <div class="space-y-12 animate-in fade-in duration-500">
+                    <div class="rounded-2xl overflow-hidden border border-gray-800 bg-black shadow-2xl">
+                        <img src="${imgPath}" class="w-full h-auto max-h-[650px] object-contain" onerror="this.src='https://via.placeholder.com/800x400?text=圖片未找到'">
+                    </div>
+
+                    <section>
+                        <h2 class="text-3xl font-bold text-white mb-6 leading-tight">${news.news_summary}</h2>
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                            <div class="lg:col-span-2 space-y-6">
+                                <h4 class="text-xs font-bold text-blue-500 uppercase tracking-widest border-b border-blue-500/20 pb-2">市場影響分析</h4>
+                                <p class="text-gray-300 text-lg leading-relaxed">${news.market_impact}</p>
+                            </div>
+                            <div class="data-card p-6 self-start">
+                                <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">關鍵術語</h4>
+                                <div class="space-y-4">
+                                    ${news.jargon_explanations.map(j => `
+                                        <div>
+                                            <div class="text-blue-400 font-bold text-sm">${j.term}</div>
+                                            <div class="text-xs text-gray-500 mt-1">${j.explanation}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    ${news.stocks_to_track.length > 0 ? `
+                        <section class="pt-8 border-t border-gray-800">
+                            <h3 class="text-xl font-bold text-white mb-10 flex items-center gap-3">
+                                <i class="fas fa-bullseye text-emerald-500"></i> 數據監測
+                            </h3>
+                            <div class="space-y-16">
+                                ${news.stocks_to_track.map(stock => `
+                                    <div class="data-card p-8">
+                                        <div class="flex justify-between items-end mb-10">
+                                            <div>
+                                                <h3 class="text-3xl font-bold text-white">${stock.name} <span class="text-gray-600 font-mono text-xl ml-2">${stock.symbol}</span></h3>
+                                                <p class="text-emerald-400/80 text-sm mt-3 max-w-2xl">${stock.reason_and_mechanism}</p>
+                                            </div>
+                                            <div class="text-right">
+                                                <p class="text-gray-500 text-xs uppercase mb-1">參考價格</p>
+                                                <p class="text-4xl font-mono font-bold text-white">${stock.closing_price}</p>
+                                            </div>
+                                        </div>
+                                        <div class="grid grid-cols-1 xl:grid-cols-2 gap-12">
+                                            <div>
+                                                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-4">法人淨買賣 (張)</p>
+                                                <div id="chart-inst-${stock.symbol}"></div>
+                                            </div>
+                                            <div>
+                                                <p class="text-[11px] font-bold text-gray-500 uppercase tracking-widest mb-4">信用交易 (張)</p>
+                                                <div id="chart-margin-${stock.symbol}"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </section>
+                    ` : ''}
+
+                    <section class="p-8 bg-blue-900/10 border border-blue-500/20 rounded-2xl">
+                        <h4 class="text-blue-400 font-bold mb-3 flex items-center gap-2">
+                            <i class="fas fa-info-circle"></i> 專業分析觀點
+                        </h4>
+                        <p class="text-gray-300 leading-relaxed text-sm">${news.additional_insights}</p>
+                    </section>
+                </div>
+            `;
+
+            setTimeout(() => {
+                news.stocks_to_track.forEach(stock => initCharts(stock));
+            }, 300);
+            document.getElementById('main-content').scrollTop = 0;
+        }
+
+        function initCharts(stock) {
+            // 法人籌碼圖
+            if (stock.institutional_trading && Object.keys(stock.institutional_trading).length > 0) {
+                const it = stock.institutional_trading;
+                new ApexCharts(document.querySelector(`#chart-inst-${stock.symbol}`), {
+                    series: [{ name: '淨買賣', data: [it.foreign_net || 0, it.investment_trust_net || 0, it.dealer_net || 0] }],
+                    chart: { type: 'bar', height: 250, toolbar: { show: false } },
+                    plotOptions: { bar: { distributed: true, borderRadius: 6, dataLabels: { position: 'top' } } },
+                    colors: ['#3b82f6', '#10b981', '#f59e0b'],
+                    xaxis: { categories: ['外資', '投信', '自營'], labels: { style: { colors: '#94a3b8' } } },
+                    theme: { mode: 'dark' },
+                    grid: { borderColor: '#334155', strokeDashArray: 4 }
+                }).render();
+            }
+            // 信用交易圖
+            if (stock.margin_trading && Object.keys(stock.margin_trading).length > 0) {
+                const mt = stock.margin_trading;
+                new ApexCharts(document.querySelector(`#chart-margin-${stock.symbol}`), {
+                    series: [{ name: '張數', data: [mt.margin_balance || 0, mt.short_balance || 0] }],
+                    chart: { type: 'bar', height: 250, toolbar: { show: false } },
+                    plotOptions: { bar: { horizontal: true, barHeight: '40%', borderRadius: 6 } },
+                    colors: ['#ef4444', '#6366f1'],
+                    xaxis: { categories: ['融資餘額', '融券餘額'], labels: { style: { colors: '#94a3b8' } } },
+                    theme: { mode: 'dark' },
+                    grid: { borderColor: '#334155', strokeDashArray: 4 }
+                }).render();
+            }
+        }
+
+        initManifest();
+    </script>
+</body>
+</html>
